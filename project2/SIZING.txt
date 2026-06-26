@@ -1,0 +1,103 @@
+SIZING.txt — Project 2, Medium M2: turning the OOM into arithmetic
+==================================================================
+Incident: the memory OOM in evidence/sample-incident.log + sample-dmesg.log.
+Model that died: an FP16 7B (deepseek-7b), KV cache pre-allocated for context=32768, batch=4.
+Sizing tool: vram_sizer.py, rules of thumb from textbook section 2.7.
+
+THE ACTUAL FAILURE CONFIG (what the box tried to load): 7B fp16, ctx 32768, batch 4
+-----------------------------------------------------------------------------------
+Model:        7B  @ fp16  (2.0 bytes/weight)
+Context:      32768 tokens x batch 4
+------------------------------------------------
+  weights         13.04 GiB
+  KV cache        14.00 GiB   (grows with context!)
+  overhead         4.87 GiB   (18%)
+------------------------------------------------
+  TOTAL           31.91 GiB
+    ->  16 GB card/box: does NOT fit
+    ->  24 GB card/box: does NOT fit
+    ->  48 GB card/box: FITS
+    ->  80 GB card/box: FITS
+
+Reminder: rules of thumb only. Re-verify on your real runner.
+
+WEIGHTS-ONLY MEMORY BY QUANTIZATION (7B):
+  fp16 ~13.04 GiB   int8 ~6.52 GiB   int4 ~3.26 GiB   q4_k_m ~3.65 GiB
+
+SAME MODEL AT TWO CONTEXT LENGTHS (batch 1):
+--- 7B fp16, ctx 4096 ---
+Model:        7B  @ fp16  (2.0 bytes/weight)
+Context:      4096 tokens x batch 1
+------------------------------------------------
+  weights         13.04 GiB
+  KV cache         0.44 GiB   (grows with context!)
+  overhead         2.43 GiB   (18%)
+------------------------------------------------
+  TOTAL           15.90 GiB
+    ->  16 GB card/box: FITS
+    ->  24 GB card/box: FITS
+    ->  48 GB card/box: FITS
+    ->  80 GB card/box: FITS
+
+Reminder: rules of thumb only. Re-verify on your real runner.
+--- 7B int8, ctx 32768 ---
+Model:        7B  @ int8  (1.0 bytes/weight)
+Context:      32768 tokens x batch 1
+------------------------------------------------
+  weights          6.52 GiB
+  KV cache         3.50 GiB   (grows with context!)
+  overhead         1.80 GiB   (18%)
+------------------------------------------------
+  TOTAL           11.82 GiB
+    ->  16 GB card/box: FITS
+    ->  24 GB card/box: FITS
+    ->  48 GB card/box: FITS
+    ->  80 GB card/box: FITS
+
+Reminder: rules of thumb only. Re-verify on your real runner.
+--- 7B q4_k_m, ctx 4096 ---
+Model:        7B  @ q4_k_m  (0.56 bytes/weight)
+Context:      4096 tokens x batch 1
+------------------------------------------------
+  weights          3.65 GiB
+  KV cache         0.44 GiB   (grows with context!)
+  overhead         0.74 GiB   (18%)
+------------------------------------------------
+  TOTAL            4.82 GiB
+    ->  16 GB card/box: FITS
+    ->  24 GB card/box: FITS
+    ->  48 GB card/box: FITS
+    ->  80 GB card/box: FITS
+
+Reminder: rules of thumb only. Re-verify on your real runner.
+--- 7B q4_k_m, ctx 32768 ---
+Model:        7B  @ q4_k_m  (0.56 bytes/weight)
+Context:      32768 tokens x batch 1
+------------------------------------------------
+  weights          3.65 GiB
+  KV cache         3.50 GiB   (grows with context!)
+  overhead         1.29 GiB   (18%)
+------------------------------------------------
+  TOTAL            8.44 GiB
+    ->  16 GB card/box: FITS
+    ->  24 GB card/box: FITS
+    ->  48 GB card/box: FITS
+    ->  80 GB card/box: FITS
+
+Reminder: rules of thumb only. Re-verify on your real runner.
+
+CONCLUSIONS
+* Smallest config that would have FIT the original ~16 GB box: q4_k_m @ 4K = ~4.8 GiB
+  (huge headroom); even q4_k_m @ 32K = ~8.4 GiB fits. The attempted fp16 @ 32K batch 4
+  needs ~31.9 GiB and only fits a 48 GB card. fp16 @ 4K = ~15.9 GiB *barely* fits 16 GB,
+  which is why one extra batch / longer context tipped it into the OOM-killer.
+* Smallest single GPU for the SANE config comfortably: a 16 GB card runs q4_k_m @ 32K
+  (~8.4 GiB) or int8 @ 32K (~11.8 GiB) with room to spare; the 32K/batch-4 fp16 plan
+  would have needed a 48 GB card.
+
+RELATING THE MATH TO THE REAL OOM LINE (the two required sentences):
+The kernel killed PID 8423 holding anon-rss:15994208 kB (~15.25 GiB) — almost exactly
+~13 GiB of fp16 7B weights plus overhead and the first slabs of a 32K KV cache, confirming
+a sizing failure, not an Ollama bug. Because the smallest fitting config (q4_k_m @ 4K,
+~4.8 GiB) leaves >10 GiB of headroom on the same box, the difference between "it crashed"
+and "it never fit, and here is exactly why" is one quantization step and a smaller context.

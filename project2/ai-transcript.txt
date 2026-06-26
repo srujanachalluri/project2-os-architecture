@@ -1,0 +1,102 @@
+ai-transcript.txt — Project 2
+Model used: Claude (claude-opus-4-8, via Claude Code)
+Date: 2026-06-25
+
+============================ EXACT PROMPT USED ============================
+You are a careful Linux administrator. Below is captured OS incident evidence.
+Diagnose the single root cause. Rules:
+ (1) Name the ONE subsystem at fault: CPU, memory, storage, or a dead/failed service.
+ (2) Quote the exact log line(s) that prove it.
+ (3) Give a confidence level (low / medium / high).
+ (4) State the fix you would apply.
+ (5) Explicitly list any lines that look alarming but are NOT the root cause.
+Do not guess silently; if you are unsure, say so.
+
+--- EVIDENCE (incident A, memory) = contents of evidence/sample-incident.log ---
+model-server[8423]: INFO  loaded model weights: deepseek-7b (fp16) in 11.3s
+model-server[8423]: WARN  KV cache pre-allocated for context=32768, batch=4
+kernel: nvme0n1: I/O timeout, retrying (attempt 1/3)
+kernel: nvme0n1: I/O retry succeeded
+model-server[8423]: WARN  request latency 4200ms exceeds soft limit
+kernel: ollama invoked oom-killer: gfp_mask=0x140cca, order=0, oom_score_adj=0
+kernel: Node 0 Normal free:39204kB min:45056kB low:56320kB
+kernel: Out of memory: Killed process 8423 (ollama) total-vm:18402112kB, anon-rss:15994208kB, file-rss:0kB, UID:1000
+systemd[1]: model-server.service: Main process exited, code=killed, status=9/KILL
+systemd[1]: model-server.service: Scheduled restart job, restart counter at 1.
+model-server[8590]: INFO  loaded model weights: deepseek-7b (fp16) in 10.9s
+kernel: Out of memory: Killed process 8590 (ollama) total-vm:18399804kB, anon-rss:15991002kB, file-rss:0kB, UID:1000
+
+========================= VERBATIM MODEL RESPONSE =========================
+DIAGNOSIS — Incident A
+
+(1) Subsystem at fault: MEMORY — specifically a model-sizing failure (the model
+    never fit in RAM).
+
+(2) Proof (exact lines):
+    "WARN  KV cache pre-allocated for context=32768, batch=4"
+    "Node 0 Normal free:39204kB min:45056kB low:56320kB"   (free dropped below the
+        kernel's minimum watermark)
+    "Out of memory: Killed process 8423 (ollama) total-vm:18402112kB, anon-rss:15994208kB"
+    "model-server.service: Main process exited, code=killed, status=9/KILL"
+    ...then a restart and a SECOND kill:
+    "Out of memory: Killed process 8590 (ollama) ... anon-rss:15991002kB"
+    The process was holding ~15.25 GiB of anonymous RSS when the kernel's OOM-killer
+    terminated it — twice.
+
+(3) Confidence: HIGH. The OOM-killer line names the process, the RSS, and the cause
+    explicitly, and the repeat kill proves it is reproducible, not transient.
+
+(4) Fix: An FP16 7B model (~13 GiB of weights) plus a KV cache pre-allocated for a
+    32K context at batch 4 cannot fit this box. "Restart" is the WRONG fix — the
+    second kill is the proof it just loops. Instead: load a quantized build
+    (Q4_K_M ≈ 3.7 GiB of weights), and/or cut context to 4K–8K and batch to 1,
+    and/or add RAM. Add a systemd `MemoryMax=` cap so it fails fast and predictably
+    instead of crash-looping and threatening neighbours like postgres.
+
+(5) Alarming but NOT the cause:
+    - "nvme0n1: I/O timeout, retrying" — the next line is "I/O retry succeeded".
+    - "usb 1-3: new high-speed USB device" — unrelated hardware event.
+    - "request latency 4200ms exceeds soft limit" — a symptom of memory pressure,
+      not the root cause.
+    - "Daily apt upgrade and clean activities" — coincidental timing only.
+
+
+--- EVIDENCE (incident B, dead service) = contents of evidence/sample-journal.log ---
+systemd[1]: Started Case Notes API.
+case-notes-api[4471]: INFO  loading config from /etc/case-notes/config.yaml
+case-notes-api[4471]: ERROR could not connect to database: FATAL: password authentication failed for user "casenotes"
+case-notes-api[4471]: FATAL startup aborted: database unavailable
+systemd[1]: case-notes-api.service: Main process exited, code=exited, status=1/FAILURE
+systemd[1]: case-notes-api.service: Failed with result 'exit-code'.
+systemd[1]: case-notes-api.service: Scheduled restart job, restart counter is at 1.
+systemd[1]: Started Case Notes API.
+case-notes-api[4502]: ERROR could not connect to database: FATAL: password authentication failed for user "casenotes"
+systemd[1]: case-notes-api.service: Scheduled restart job, restart counter is at 2.
+
+========================= VERBATIM MODEL RESPONSE =========================
+DIAGNOSIS — Incident B
+
+(1) Subsystem at fault: a DEAD / FAILED SERVICE — a configuration/credential
+    failure, NOT a code crash and NOT resource exhaustion.
+
+(2) Proof (the FIRST failure after the last clean start):
+    "ERROR could not connect to database: FATAL: password authentication failed
+        for user \"casenotes\""
+    "FATAL startup aborted: database unavailable"
+    "case-notes-api.service: Main process exited, code=exited, status=1/FAILURE"
+    "Scheduled restart job, restart counter is at 1 ... at 2"
+
+(3) Confidence: HIGH. The error is explicit and identical on every restart, and the
+    exit is code=exited status=1 (a clean application abort), not a signal or OOM.
+
+(4) Fix: Correct the database credential for user "casenotes" — reset/sync the
+    password to what postgres expects (or fix the secret the service reads) — then
+    restart the service; the loop stops the moment auth succeeds. Optionally set
+    `StartLimitIntervalSec`/`StartLimitBurst` so a future failure stops hammering
+    instead of looping forever.
+
+(5) Alarming but NOT the cause:
+    - The repeated, fresh-looking "Started Case Notes API" lines and the climbing
+      restart counter look like recovery — they are the SAME failure repeating (the
+      crash loop). Reading only the latest "Started ..." line would mislead you.
+    - The INFO "loading config" lines are normal startup noise, not the problem.

@@ -1,0 +1,26 @@
+# Two iostat -x captures for Chapter 2, Rep 6 / Project 2 (Medium).
+# One box is CPU-bound, one is I/O-bound. Tell them apart from the columns.
+# Command:  iostat -x 2
+
+############################  CAPTURE A  ############################
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+          91.40    0.00    6.10    0.30    0.00    2.20
+
+Device   r/s     w/s   rkB/s    wkB/s   await  aqu-sz  %util
+nvme0n1  12.0    8.0   480.0    320.0    0.40    0.01    1.10
+
+# CAPTURE A reading: %user is ~91, %iowait ~0.3, disk %util ~1%. The CPUs are
+# doing work, not waiting on disk. This box is CPU-BOUND. Adding storage speed
+# buys nothing; you need more/faster CPU or less work.
+
+############################  CAPTURE B  ############################
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+           4.10    0.00    3.20   78.60    0.00   14.10
+
+Device   r/s      w/s    rkB/s     wkB/s    await  aqu-sz  %util
+nvme0n1  9.0    1820.0    288.0  233000.0   142.30   12.40   99.40
+
+# CAPTURE B reading: %iowait ~79, %user ~4, disk %util ~99%, await ~142ms,
+# aqu-sz ~12 (a deep queue). The CPUs are IDLE, waiting on a saturated disk.
+# This box is I/O-BOUND. Those D-state processes in the process table are
+# queued right here. Adding CPU cores does nothing — fix the storage.

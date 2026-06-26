@@ -1,0 +1,25 @@
+# Sample journald capture of a CRASH-LOOPING service. Chapter 2, Rep 7.
+# Command:  journalctl -u case-notes-api -b --no-pager
+# The trap: systemctl status shows "activating (auto-restart)" and a fresh,
+# clean-looking start. Scroll UP to the FIRST failure after the last clean boot.
+Jun 19 09:02:11 relief-app systemd[1]: Started Case Notes API.
+Jun 19 09:02:12 relief-app case-notes-api[4471]: INFO  loading config from /etc/case-notes/config.yaml
+Jun 19 09:02:12 relief-app case-notes-api[4471]: ERROR could not connect to database: FATAL: password authentication failed for user "casenotes"
+Jun 19 09:02:12 relief-app case-notes-api[4471]: FATAL startup aborted: database unavailable
+Jun 19 09:02:12 relief-app systemd[1]: case-notes-api.service: Main process exited, code=exited, status=1/FAILURE
+Jun 19 09:02:12 relief-app systemd[1]: case-notes-api.service: Failed with result 'exit-code'.
+Jun 19 09:02:17 relief-app systemd[1]: case-notes-api.service: Scheduled restart job, restart counter is at 1.
+Jun 19 09:02:17 relief-app systemd[1]: Started Case Notes API.
+Jun 19 09:02:18 relief-app case-notes-api[4502]: INFO  loading config from /etc/case-notes/config.yaml
+Jun 19 09:02:18 relief-app case-notes-api[4502]: ERROR could not connect to database: FATAL: password authentication failed for user "casenotes"
+Jun 19 09:02:18 relief-app case-notes-api[4502]: FATAL startup aborted: database unavailable
+Jun 19 09:02:18 relief-app systemd[1]: case-notes-api.service: Failed with result 'exit-code'.
+Jun 19 09:02:23 relief-app systemd[1]: case-notes-api.service: Scheduled restart job, restart counter is at 2.
+Jun 19 09:02:23 relief-app systemd[1]: Started Case Notes API.
+Jun 19 09:02:24 relief-app case-notes-api[4533]: INFO  loading config from /etc/case-notes/config.yaml
+#  ... loop continues ...
+#
+# Reading: the FIRST failure (09:02:12) is the cause — a bad DB password, NOT a
+# code crash. Every restart after is the LOOP, repeating the same root failure.
+# Reading only the latest "Started ..." line would mislead you into thinking it
+# is recovering. Fix the credential; the loop stops.

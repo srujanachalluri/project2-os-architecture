@@ -1,0 +1,25 @@
+# Sample kernel ring buffer capture (dmesg -T) for Chapter 2, Rep 4 / Project 2.
+# Find the OOM-killer event by hand:
+#   grep -i -E 'killed process|out of memory|oom' sample-dmesg.log
+[Fri Jun 19 02:14:01 2026] systemd[1]: Started Session 412 of user deploy.
+[Fri Jun 19 02:14:55 2026] EXT4-fs (nvme0n1p2): mounted filesystem with ordered data mode.
+[Fri Jun 19 02:31:09 2026] ollama invoked oom-killer: gfp_mask=0x140cca, order=0, oom_score_adj=0
+[Fri Jun 19 02:31:09 2026] CPU: 3 PID: 8423 Comm: ollama Not tainted 6.8.0-40-generic
+[Fri Jun 19 02:31:09 2026] Mem-Info:
+[Fri Jun 19 02:31:09 2026] active_anon:3901244 inactive_anon:18 isolated_anon:0
+[Fri Jun 19 02:31:09 2026] Node 0 Normal: free:41208kB min:45056kB low:56320kB high:67584kB
+[Fri Jun 19 02:31:09 2026] 16322 total pagecache pages
+[Fri Jun 19 02:31:09 2026] Tasks state (memory values in pages):
+[Fri Jun 19 02:31:09 2026] [   pid ]   uid  total_vm      rss  name
+[Fri Jun 19 02:31:09 2026] [   1190]    26    173044    156200  postgres
+[Fri Jun 19 02:31:09 2026] [   8423]  1000   4600528   3998552  ollama
+[Fri Jun 19 02:31:09 2026] Out of memory: Killed process 8423 (ollama) total-vm:18402112kB, anon-rss:15994208kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:31624kB oom_score_adj:0
+[Fri Jun 19 02:31:10 2026] oom_reaper: reaped process 8423 (ollama), now anon-rss:0kB, file-rss:0kB, shmem-rss:0kB
+[Fri Jun 19 02:31:12 2026] systemd[1]: model-server.service: Main process exited, code=killed, status=9/KILL
+[Fri Jun 19 02:31:12 2026] systemd[1]: model-server.service: Failed with result 'signal'.
+#
+# Reading: PID 8423 (ollama) was holding anon-rss:15994208kB (~16GB) when the
+# kernel killed it. The box was out of RAM (Normal free:41208kB < min:45056kB).
+# This is a SIZING failure, not an Ollama bug: an FP16 7B (~14-16GB) was loaded
+# on a box without the RAM. A Q4_K_M quant (~4-5GB) would have fit. The fix is
+# NOT "restart" — it OOMs again on the next load.
