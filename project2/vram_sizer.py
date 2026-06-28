@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""vram_sizer.py - hand-checkable memory sizing for a local LLM (Chapter 2).
-
-Estimates the RAM/VRAM an LLM needs:  weights + KV cache + framework overhead.
-These are ROUGH rules of thumb (mid-2026); real numbers vary by model and
-runner. Always re-verify against your actual deployment. See chapter sec 2.7.
-
-  python3 vram_sizer.py --params 7  --quant q4   --context 8192
-  python3 vram_sizer.py --params 70 --quant int4 --context 32768
+"""vram_sizer.py - hand-checkable memory sizing for a local LLM
 """
 import argparse
 
